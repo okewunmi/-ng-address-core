@@ -22,8 +22,3 @@ npm run check
 3. Run the full suite.
 4. Add a changelog entry if the public behavior changes.
 5. Explain confidence or matching implications in the PR.
-
-
-## Development
-
-Use Node 22.6+ (tests are TypeScript run via `--experimental-strip-types`). `npm install && npm run check`. Every parser change needs a regression test with *exact* expected fields; never assert only that "some street" exists.

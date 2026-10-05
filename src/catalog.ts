@@ -254,12 +254,3 @@ export type LgaResolution = { status: "not-found" } | { status: "unique"; record
 export function resolveLgaV8(name: string, state?: string): LgaResolution { const matches=findLgasV8(name,state); if(matches.length===0)return {status:"not-found"}; if(matches.length===1)return {status:"unique",record:matches[0]!}; return {status:"ambiguous",records:matches}; }
 export interface AdministrativeConflict { normalized: string; records: readonly LgaRecordV8[]; reason: "duplicate-name-across-states"; }
 export function findAdministrativeConflicts(): readonly AdministrativeConflict[] { const groups=new Map<string,LgaRecordV8[]>(); for(const r of LGAS_V8){const k=key(r.name); const arr=groups.get(k)??[]; arr.push(r); groups.set(k,arr);} return [...groups.entries()].filter(([,v])=>new Set(v.map(x=>x.state)).size>1).map(([normalized,records])=>({normalized,records,reason:"duplicate-name-across-states" as const})); }
-
-// ---- Unversioned public names (the *V8 names above are kept as deprecated aliases) ----
-/** Bundled administrative dataset manifest. */
-export const ADMINISTRATIVE_DATASET: DatasetManifest = ADMINISTRATIVE_DATASET_V8;
-export const STATES: readonly StateRecord[] = STATES_V8;
-export const LGAS: readonly LgaRecordV8[] = LGAS_V8;
-export const getState = getStateV8;
-export const listLgas = getLgasV8;
-export const lookupLga = resolveLgaV8;

@@ -30,7 +30,8 @@ export function fuzzyTextSimilarity(a:string,b:string):number {
 export function compareAddressStrings(a:string,b:string):AddressComparison {
   const left=parseAddress(a).address;
   const right=parseAddress(b).address;
-  return compareAddresses(left,right);
+  if(left&&right)return compareAddresses(left,right);
+  return {sameEntity:fuzzyTextSimilarity(a,b)>=.86,confidence:fuzzyTextSimilarity(a,b),evidence:[{field:"raw",score:fuzzyTextSimilarity(a,b),weight:1,reason:"Fuzzy token and edit-distance comparison."}],contradictions:[]};
 }
 export function rankAddressCandidates(input:string,candidates:string[],limit=5):FuzzyMatch[] {
   return candidates.map(candidate=>({candidate,score:fuzzyTextSimilarity(input,candidate)})).sort((a,b)=>b.score-a.score).slice(0,Math.max(1,limit));

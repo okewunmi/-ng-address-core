@@ -2,8 +2,9 @@ import { NIGERIAN_STATES, STATE_ALIASES, LANDMARK_RELATIONS } from "./data.js";
 import { STATES_V8 } from "./catalog.js";
 import { classifyAddress } from "./classify.js";
 import { extractPostcodes } from "./postcode.js";
-import { normalizeComparable, normalizeState, normalizeStreet, normalizeText, smartTitleCase, tokenize } from "./normalize.js";
+import { normalizeComparable, normalizeState, normalizeStreet, normalizeText, tokenize } from "./normalize.js";
 import { validateAdministrativeUnits } from "./administrative.js";
+import { normalizeLocality, resolveLocality } from "./locality.js";
 import { findLga } from "./lga-data.js";
 import type { AddressParseResult, Landmark, NgAddress, ParseOptions, LandmarkRelation } from "./types.js";
 
@@ -11,48 +12,36 @@ const stateNames = NIGERIAN_STATES.map(([name]) => name).sort((a,b)=>b.length-a.
 const relationAlternation = LANDMARK_RELATIONS.map(escapeRegExp).sort((a,b)=>b.length-a.length).join("|");
 const relationPattern = new RegExp(`^\\s*(${relationAlternation})\\b`, "i");
 const inlineRelationPattern = new RegExp(`\\b(${relationAlternation})\\b\\s+([^,\\n]+)`, "i");
-const housePattern = /^(?:(?:house\s+)?(?:no|number|house)\b\.?|plot\b\.?)\s*[:#-]?\s*([0-9]+[A-Za-z]?(?:\/[0-9]+)?)(?:\s*,?\s*(.*))?$/i;
-const PREMISES_RE = /\b(headquarters|hq|secretariat|offices?|school|college|university|hospital|clinic|hotel|bank|mall|plaza|centre|center|towers?|stadium)\b/i;
-const STREET_TYPE_RE = /\b(street|st|road|rd|avenue|ave|close|cl|crescent|cres|drive|dr|way|lane|ln|boulevard|blvd|highway|expressway|court|ct|place|terrace|layout|bypass|link)\b\.?/i;
+const housePattern = /^(?:house|no|number|plot)\s*[:#-]?\s*([0-9]+[A-Za-z]?(?:\/[0-9]+)?)(?:\s*,?\s*(.*))?$/i;
 const leadingHousePattern = /^([0-9]+[A-Za-z]?(?:\/[0-9]+)?)[,\s]+(.+)$/;
 const unitPattern = /^(flat|shop|unit|block|building)\s*[:#-]?\s*([0-9A-Za-z]+(?:\/[0-9]+)?)(?:\s*,?\s*(.*))?$/i;
-const CITY_ALIASES: Record<string, string> = {
-  "vi": "Victoria Island", "v i": "Victoria Island", "v.i": "Victoria Island",
-  "ibadan": "Ibadan", "abuja": "Abuja", "kaduna": "Kaduna", "lagos": "Lagos",
-  "benin city": "Benin City", "port harcourt": "Port Harcourt", "port-harcourt": "Port Harcourt"
-};
 const CAPITAL_TO_STATE = new Map(STATES_V8.map(state => [normalizeComparable(state.capital), state.name]));
 
 function escapeRegExp(value: string): string { return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 function canonicalPart(value: string): string { return normalizeComparable(value).replace(/\s+state$/, "").trim(); }
-const STATE_PART_LOOKUP: ReadonlyMap<string, string> = (() => {
-  const m = new Map<string, string>();
-  for (const [alias, name] of Object.entries(STATE_ALIASES)) m.set(canonicalPart(alias), name);
-  for (const name of stateNames) m.set(canonicalPart(name), name);
-  return m;
-})();
-function findStateInPart(part: string): string | undefined { return STATE_PART_LOOKUP.get(canonicalPart(part)); }
+function findStateInPart(part: string): string | undefined {
+  const normalized = canonicalPart(part);
+  for (const name of stateNames) if (normalized === canonicalPart(name)) return name;
+  for (const [alias,name] of Object.entries(STATE_ALIASES)) if (normalized === canonicalPart(alias)) return name;
+  return undefined;
+}
 function findState(parts: string[]): { name: string; index: number } | undefined {
   for (let i=parts.length-1;i>=0;i--) { const name=findStateInPart(parts[i]!); if(name) return {name:normalizeState(name)!,index:i}; }
   return undefined;
 }
-const STATE_FREE_TEXT_PATTERNS: ReadonlyArray<[string, RegExp]> = stateNames.map(name => [name, new RegExp(`(?:^|[\\s,])(${escapeRegExp(name)})(?:\\s+State(?=$|[\\s,])|(?=[\\s,]*$))`, "iu")]);
 function findStateInFreeText(raw: string): { name: string; textWithoutState: string } | undefined {
   const normalized = raw.normalize("NFKC");
-  for (const [name, re] of STATE_FREE_TEXT_PATTERNS) {
+  for (const name of stateNames) {
+    const re = new RegExp(`(?:^|[\\s,])(${escapeRegExp(name)})(?:\\s+State)?(?:$|[\\s,])`, "iu");
     const match = normalized.match(re);
     if (match?.index !== undefined) return {name, textWithoutState: `${normalized.slice(0,match.index)} ${normalized.slice(match.index + match[0].length)}`.replace(/\s{2,}/g," ").trim()};
   }
   return undefined;
 }
-function titleCase(value: string): string { return smartTitleCase(value); }
-function normalizeCity(value: string): string {
-  const key = canonicalPart(value);
-  const alias = CITY_ALIASES[key];
-  if (alias) return alias;
-  const capital = STATES_V8.find(state => normalizeComparable(state.capital) === key)?.capital;
-  return capital ?? titleCase(value);
+function titleCase(value: string): string {
+  return normalizeText(value).toLowerCase().replace(/(^|[\s\-/])([a-z])/g, (_, prefix: string, letter: string) => `${prefix}${letter.toUpperCase()}`);
 }
+function normalizeCity(value: string): string { return normalizeLocality(value); }
 function extractLandmarks(raw: string): Landmark[] {
   const results: Landmark[]=[];
   const re=new RegExp(`(?:^|[,\\n])\\s*(?:[A-Za-z0-9]+\\s+)?(${relationAlternation})\\b\\s+([^,\\n]+)` ,"gi");
@@ -72,10 +61,10 @@ function extractInlineLandmark(segment: string): (Landmark & { index: number }) 
   const value=normalizeText(match[2]??"").replace(/\.$/,"");
   return value && relation ? {relation,value,index:match.index} : undefined;
 }
-function extractHouseAndStreet(segment: string): {houseNumber?:string;street?:string;unit?:string;poBox?:string;landmark?:Landmark} {
+function extractHouseAndStreet(segment: string): {houseNumber?:string;street?:string;unit?:string;landmark?:Landmark} {
   const value=segment.trim().replace(/^[,\s]+|[,\s]+$/g,"");
   const po=value.match(/^(p\.?\s*o\.?\s*box|post\s*office\s*box)\s*([0-9]+)?/i);
-  if(po) return {poBox:normalizeText(value)};
+  if(po) return {unit:normalizeText(value)};
   const inlineLandmark=extractInlineLandmark(value);
   const normalizedInlineLandmark: Landmark | undefined = inlineLandmark && inlineLandmark.relation ? { relation: inlineLandmark.relation, value: inlineLandmark.value } : undefined;
   const valueWithoutLandmark=inlineLandmark ? value.slice(0, inlineLandmark.index).trim().replace(/\s+(behind|opposite|beside|near|after|before|along|off|inside|within|alongside|by|close to)\s*$/i,"").trim() : value;
@@ -98,15 +87,17 @@ function stripPostcodes(raw:string):string {
   return raw.replace(/\b\d{6}\b/g,"").replace(/\b[A-Za-z]{2}(?:[-\s]?\d{2})[-\s]?[A-Za-z0-9]{3}[-\s]?[A-Za-z]{2}[-\s]?\d{2}\b/g,"").replace(/\bNigeria\b/gi,"").replace(/\s{2,}/g," ").trim();
 }
 function inferCapital(parts: string[]): { locality?: string; state?: string; index?: number; source?: string } {
-  for (let i=parts.length-1;i>=0;i--) {
-    const city=normalizeCity(parts[i]!);
-    const state=CAPITAL_TO_STATE.get(normalizeComparable(city));
-    if(state) return {locality:city,state,index:i};
-    if (parts.length !== 1) continue;
-    const normalizedPart=normalizeComparable(parts[i]!);
-    for (const [capital, capitalState] of CAPITAL_TO_STATE) {
-      const re = new RegExp(`\\b${escapeRegExp(capital)}\\b`, "i");
-      if (re.test(normalizedPart)) return {locality: normalizeCity(capital), state: capitalState, index:i};
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const value = parts[i]!;
+    const resolved = resolveLocality(value);
+    const capital = resolved.candidates.find((candidate) => candidate.kind === "capital");
+    if (capital) return { locality: capital.name, state: capital.state, index: i, source: capital.matchedBy };
+    const comparable = normalizeComparable(value);
+    for (const state of STATES_V8) {
+      const capitalKey = normalizeComparable(state.capital);
+      if (comparable.includes(capitalKey) && capitalKey.length >= 4) {
+        return { locality: state.capital, state: state.name, index: i, source: "embedded" };
+      }
     }
   }
   return {};
@@ -126,46 +117,40 @@ export function parseAddress(raw:string, options:ParseOptions={}):AddressParseRe
   const capitalHint=inferCapital(parts);
   const state=stateMatch?{name:stateMatch.name}:freeTextState?{name:freeTextState.name}:capitalHint.state?{name:capitalHint.state}:undefined;
   const effectiveStateIndex=stateMatch?.index;
-  let contentParts=effectiveStateIndex!==undefined ? parts.filter((_,i)=>i!==effectiveStateIndex) : parts;
+  const contentParts=effectiveStateIndex!==undefined ? parts.filter((_,i)=>i!==effectiveStateIndex) : parts;
   const landmarks=[...extractLandmarks(original)];
-  let premises:string|undefined;
-  if(contentParts.length>1){const head=contentParts[0]!;
-    if(!/^\d/.test(head)&&!relationPattern.test(head)&&PREMISES_RE.test(head)&&!STREET_TYPE_RE.test(head)&&!unitPattern.test(head)&&!housePattern.test(head)){premises=smartTitleCase(head);contentParts=contentParts.slice(1);}
-  }
-  let poBox:string|undefined;
   let houseNumber:string|undefined,street:string|undefined,unit:string|undefined,locality:string|undefined,district:string|undefined,area:string|undefined,lga:{name:string}|undefined;
   if(contentParts.length){
-    const first=extractHouseAndStreet(contentParts[0]!); houseNumber=first.houseNumber;street=first.street;unit=first.unit;poBox=first.poBox;if(street&&/^(district|sector|area)\b|\b(district|sector)$/i.test(contentParts[0]!))street=undefined;if(first.landmark&&!landmarks.some(x=>x.relation===first.landmark!.relation&&x.value===first.landmark!.value)) landmarks.unshift(first.landmark);
+    const first=extractHouseAndStreet(contentParts[0]!); houseNumber=first.houseNumber;street=first.street;unit=first.unit;if(first.landmark&&!landmarks.some(x=>x.relation===first.landmark!.relation&&x.value===first.landmark!.value)) landmarks.unshift(first.landmark);
     let remaining=contentParts.slice(1);
     if (unit && /^(flat|block|shop|unit|building)\b/i.test(contentParts[0]!)) {
       const units=[contentParts[0]!];
       while (remaining.length && /^(flat|block|shop|unit|building)\b/i.test(remaining[0]!)) units.push(remaining.shift()!);
       unit=normalizeText(units.join(", "));
-      if(!houseNumber&&remaining.length){const plot=remaining[0]!.match(/^plot\b\.?\s*[:#-]?\s*([0-9]+[A-Za-z]?(?:\/[0-9]+)?)\s*$/i); if(plot){houseNumber=plot[1];remaining.shift();}}
     }
     if(!houseNumber&&!street&&!unit&&capitalHint.index===0) remaining=contentParts.slice(1);
     const labeledLga=contentParts.find(x=>/\bLGA\b/i.test(x));
     if(labeledLga){const candidate=labeledLga.replace(/\s*\bLGA\b[:\s-]*$/i,"").trim();if(candidate)lga={name:candidate};}
     const explicitArea=contentParts.find(x=>/\b(district|sector|area)\b/i.test(x));
-    if(explicitArea){const label=smartTitleCase(explicitArea); if(/^(district|sector|area)\b/i.test(explicitArea)) area=label; else district=label;}
-    const localityCandidates=remaining.filter(x=>x !== labeledLga && x !== explicitArea && !/\bLGA\b/i.test(x)&&!/^\s*(district|sector|area)\b/i.test(x)&&!relationPattern.test(x));
+    if(explicitArea) area=explicitArea.replace(/^.*?\b(district|sector|area)\b[:\s-]*/i," ").trim();
+    const localityCandidates=remaining.filter(x=>x !== labeledLga && !/\bLGA\b/i.test(x)&&!/^\s*(district|sector|area)\b/i.test(x)&&!relationPattern.test(x));
     if(capitalHint.locality && contentParts.some(x=>normalizeComparable(normalizeCity(x))===normalizeComparable(capitalHint.locality))) {
       locality=capitalHint.locality;
       const cityIndex=contentParts.findIndex(x=>normalizeComparable(normalizeCity(x))===normalizeComparable(capitalHint.locality));
-      const beforeCity=contentParts.slice(Math.max(0,cityIndex-((street||poBox||explicitArea)?1:0)),cityIndex);
+      const beforeCity=contentParts.slice(Math.max(0,cityIndex-(street?1:0)),cityIndex);
       const candidate=beforeCity.at(-1);
       const candidateStreet = candidate ? extractHouseAndStreet(candidate).street : undefined;
-      if(candidate&&normalizeComparable(candidateStreet)!==normalizeComparable(street)&&!/\bLGA\b/i.test(candidate)&&candidate!==explicitArea&&candidate!==contentParts[0]) district=cleanPart(candidate);
+      if(candidate&&normalizeComparable(candidateStreet)!==normalizeComparable(street)&&!/\bLGA\b/i.test(candidate)&&!explicitArea) district=cleanPart(candidate);
     } else if(localityCandidates.length) {
       locality=normalizeCity(localityCandidates.at(-1)!);
-      if(localityCandidates.length>1 && !street && !unit && !houseNumber && !poBox) district=normalizeText(localityCandidates.at(-2)!);
+      if(localityCandidates.length>1 && !street && !unit) district=normalizeText(localityCandidates.at(-2)!);
     }
     if(!locality && remaining.length) {
       const fallback=remaining.find(x=>x !== labeledLga && !/\bLGA\b/i.test(x));
       if(fallback) locality=normalizeCity(fallback);
     }
-    if(!street && !poBox && !explicitArea && remaining.length) {
-      const streetCandidate=remaining.find(x=>x!==explicitArea&&!relationPattern.test(x)&&!x.includes("LGA")&&!/^(district|sector|area)\b/i.test(x));
+    if(!street && remaining.length) {
+      const streetCandidate=remaining.find(x=>!relationPattern.test(x)&&!x.includes("LGA")&&!/^(district|sector|area)\b/i.test(x));
       if(streetCandidate && normalizeComparable(streetCandidate)!==normalizeComparable(locality)) street=normalizeStreet(streetCandidate);
     }
   }
@@ -179,7 +164,7 @@ export function parseAddress(raw:string, options:ParseOptions={}):AddressParseRe
       const match=source.match(cityRe);
       const beforeCity=match?.index !== undefined ? source.slice(0,match.index).trim() : source;
       const first=extractHouseAndStreet(beforeCity);
-      houseNumber=first.houseNumber??houseNumber; street=first.street??street; unit=first.unit??unit; if(street&&/^(district|sector|area)\b|\b(district|sector)$/i.test(source)){ street=undefined; district=district??smartTitleCase(source); }
+      houseNumber=first.houseNumber??houseNumber; street=first.street??street; unit=first.unit??unit;
       if (first.unit && first.street && /\b(estate|compound|phase|oluyole)\b/i.test(first.street)) { district=normalizeText(first.street); street=undefined; }
       if(first.landmark && !landmarks.some(x=>x.relation===first.landmark!.relation&&x.value===first.landmark!.value)) landmarks.unshift(first.landmark);
     }
@@ -190,8 +175,9 @@ export function parseAddress(raw:string, options:ParseOptions={}):AddressParseRe
     if(capitalHint.locality && firstCanonical === normalizeComparable(capitalHint.locality)) street=undefined;
   }
   if(!state && capitalHint.state) { /* already represented by capital hint */ }
+  if (locality) locality = normalizeLocality(locality);
   if(!lga && state && locality) { const inferred=findLga(locality,state.name); if(inferred) lga={name:inferred.name}; }
-  const address:NgAddress={country:"NG",...(state?{state}:{}),...(lga?{lga}:{}),...(locality?{locality:normalizeText(locality)}:{}),...(district?{district:normalizeText(district)}:{}),...(area?{area:normalizeText(area)}:{}),...(street?{street:normalizeStreet(street)}:{}),...(houseNumber?{houseNumber}:{}),...(unit?{unit}:{}),...(poBox?{poBox}:{}),...(premises?{premises}:{}),...(landmarks[0]?{landmark:landmarks[0]}:{}),...(landmarks.length?{landmarks}:{}),...(legacy?{postcode:legacy}:{}),...(digital?{digitalPostcode:digital}:{}),raw:original,normalized:normalizeText([houseNumber,street,district,locality,state?.name].filter(Boolean).join(", ")),confidence:0,type:"unknown",warnings:[]};
+  const address:NgAddress={country:"NG",...(state?{state}:{}),...(lga?{lga}:{}),...(locality?{locality:normalizeText(locality)}:{}),...(district?{district:normalizeText(district)}:{}),...(area?{area:normalizeText(area)}:{}),...(street?{street:normalizeStreet(street)}:{}),...(houseNumber?{houseNumber}:{}),...(unit?{unit}:{}),...(landmarks[0]?{landmark:landmarks[0]}:{}),...(landmarks.length?{landmarks}:{}),...(legacy?{postcode:legacy}:{}),...(digital?{digitalPostcode:digital}:{}),raw:original,normalized:normalizeText([houseNumber,street,district,locality,state?.name].filter(Boolean).join(", ")),confidence:0,type:"unknown",warnings:[]};
   if(options.strict&&!address.houseNumber&&!address.state&&!address.locality&&!address.landmark&&!address.postcode&&!address.digitalPostcode) throw new Error("Address does not contain enough recognizable Nigerian address structure.");
   if(options.validateAdministrativeUnits){const validation=validateAdministrativeUnits({...address.state?.name ? {state: address.state.name} : {}, ...address.lga?.name ? {lga: address.lga.name} : {}});address.warnings.push(...validation.warnings);if(validation.lga?.valid===false&&address.lga) address.warnings.push("LGA was not found in the bundled administrative registry.");}
   address.type=classifyAddress(address);

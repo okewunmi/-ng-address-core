@@ -4,8 +4,6 @@ import { normalizeComparable } from "./normalize.js";
 export function addressFingerprint(address: NgAddress): string {
   const parts = [
     address.houseNumber,
-    address.unit,
-    address.poBox,
     address.street,
     address.area,
     address.district,

@@ -6,7 +6,7 @@ import { validateAddress, addressId } from "./production.js";
 import { resolveAdministrative, type AdministrativeResolution } from "./resolution.js";
 import { normalizeComparable } from "./normalize.js";
 
-export const NG_ADDRESS_CORE_VERSION = "0.1.0-alpha.1" as const;
+export const NG_ADDRESS_CORE_VERSION = "0.11.0" as const;
 
 export type AddressResolutionStatus = "resolved" | "partial" | "ambiguous" | "conflict" | "not-found";
 
@@ -65,7 +65,7 @@ function mergeAdministrative(address: NgAddress, administrative: AdministrativeR
  */
 export function resolveAddress(input: string, options: ResolveAddressOptions = {}): AddressResolution {
   const parsed = parseAddress(input, options.strict === undefined ? {} : { strict: options.strict });
-  const administrative = resolveAdministrative(parsed.address, {
+  const administrative = resolveAdministrative(input, {
     ...(options.limit === undefined ? {} : { limit: options.limit }),
     ...(options.minAdministrativeScore === undefined ? {} : { minScore: options.minAdministrativeScore }),
   });

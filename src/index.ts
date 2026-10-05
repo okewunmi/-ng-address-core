@@ -24,3 +24,4 @@ export * from "./catalog.js";
 export * from "./resolution.js";
 
 export * from "./address-resolution.js";
+export * from "./locality.js";

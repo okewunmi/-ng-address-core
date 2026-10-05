@@ -1,16 +1,56 @@
-# @ng-address/core
+## v0.11.0
 
-> **Status: alpha (`0.1.0-alpha.1`, published under the `next` tag).** The API may change. See "Known limitations".
+v0.11 adds locality/entity resolution and benchmark-oriented parser hardening.
 
-Offline, deterministic Nigerian address intelligence: parse messy addresses, resolve state/LGA against a bundled national catalog, compare, score and fingerprint them. It does **not** verify that an address exists.
+### Locality resolution
 
-## How this relates to NIPOST's Digital Postcode
+```ts
+import { normalizeLocality, resolveLocality } from "@ng-address/core";
 
-NIPOST's postcode (NDAPS) tells you whether a *building code* exists. Most real inputs are still free text ("No. 14 behind the mosque, Mokola"). This package sits **in front of** NIPOST: it turns free text into structured, normalized fields and an administrative guess, and extracts/validates the *format* of any postcode written in the address. Use the NIPOST API (via the optional `NipostClient`, or NIPOST's own SDKs) for authoritative lookup. If you only need postcode parsing/lookup, a dedicated NIPOST client may be enough for you.
+normalizeLocality("Ìbàdàn"); // "Ibadan"
+normalizeLocality("V.I.");    // "Victoria Island"
 
-## `resolveAddress` (orchestration)
+resolveLocality("Oluyole", "Oyo");
+// unique → canonical Oyo LGA entity
+```
 
-`resolveAddress` combines parsing, national administrative entity resolution, structural validation, quality scoring and deterministic identity into one offline pipeline.
+The resolver distinguishes capital cities from LGA names and returns `unique`, `ambiguous`, or `not-found`. It does not claim that a locality or building exists.
+
+### Parser hardening
+
+- embedded city detection for unpunctuated addresses such as `14 Bodija Road Ibadan Oyo State`
+- diacritic-insensitive locality matching
+- stable canonical casing for locality values, including all-uppercase input
+- explicit locality normalization reused by the parser and public resolver
+- ambiguity protection when a locality/entity cannot be uniquely resolved
+
+### Benchmark coverage
+
+v0.11 adds adversarial field-level tests for state, locality, street and house-number extraction on messy Nigerian address forms, alongside the existing 200-case regression corpus.
+
+Administrative and public-address references remain provenance-aware and are not treated as proof of address existence.
+
+# @ng-address/core v0.10.0
+
+Production-oriented Nigerian address intelligence with deterministic parsing, fuzzy matching, quality scoring, batch processing, privacy helpers, NIPOST provider boundaries, and a provenance-aware national administrative catalog.
+
+## What's new in v0.10.0
+
+- Bundled **37 states/FCT** administrative records.
+- Bundled **774 administrative units**: **768 state LGAs + 6 FCT area councils**.
+- Added state codes, capitals, geopolitical zones and common state aliases.
+- Added canonical LGA names with selected Nigerian spelling/format aliases.
+- Added deterministic LGA lookup with explicit `unique`, `ambiguous`, and `not-found` outcomes.
+- Added administrative conflict detection so duplicate LGA names are never silently treated as globally unique.
+- Added dataset provenance and manifest metadata.
+- Kept the core offline and dependency-free.
+
+The current INEC directory lists 36 states + FCT and 774 LGA offices. The catalog is therefore deliberately modeled as 768 state LGAs plus 6 FCT area councils rather than pretending FCT councils are ordinary state LGAs.
+
+
+## v1.0 stable orchestration API
+
+The v1 API combines parsing, national administrative entity resolution, structural validation, quality scoring and deterministic identity into one offline pipeline.
 
 ```ts
 import { resolveAddress, resolveAddresses } from "@ng-address/core";
@@ -56,19 +96,19 @@ Batch results preserve input order and isolate individual parse errors.
 
 ```ts
 import {
-  ADMINISTRATIVE_DATASET,
-  getState,
-  listLgas,
-  lookupLga,
+  ADMINISTRATIVE_DATASET_V8,
+  getStateV8,
+  getLgasV8,
+  resolveLgaV8,
 } from "@ng-address/core";
 
-console.log(ADMINISTRATIVE_DATASET);
-// { version: "0.8.0" /* dataset revision, not the package version */, states: 37, lgas: 768, fctAreaCouncils: 6, ... }
+console.log(ADMINISTRATIVE_DATASET_V8);
+// { version: "0.8.0", states: 37, lgas: 768, fctAreaCouncils: 6, ... }
 
-const lagos = getState("Lagos State");
-const lagosLgas = listLgas("Lagos");
+const lagos = getStateV8("Lagos State");
+const lagosLgas = getLgasV8("Lagos");
 
-const result = lookupLga("Ibadan South West", "Oyo");
+const result = resolveLgaV8("Ibadan South West", "Oyo");
 if (result.status === "unique") {
   console.log(result.record.name); // Ibadan South-West
 }
@@ -79,7 +119,7 @@ if (result.status === "unique") {
 Some LGA names occur in more than one state. Without a state constraint, resolution can return `ambiguous`:
 
 ```ts
-const result = lookupLga("Obi");
+const result = resolveLgaV8("Obi");
 
 if (result.status === "ambiguous") {
   // Ask the caller for the state instead of choosing one arbitrarily.
@@ -95,7 +135,7 @@ This catalog is **not** an address-existence database. A state/LGA match does no
 ## Batch parsing
 
 ```ts
-const results = parseAddresses(inputs); // synchronous; order preserved; errors isolated per item
+const results = parseAddresses(inputs, { concurrency: 32 });
 ```
 
 ## Structural validation
@@ -112,7 +152,7 @@ This checks structure and format. It does not prove that the address exists.
 const safe = redactAddress(address);
 ```
 
-Removes building-level identifiers: raw/normalized strings, house number, unit, P.O. Box, premises, landmarks, coordinates and the Digital Postcode. Street/locality/state are kept; pass `{ coarse: true }` to drop those too.
+This removes raw address, normalized address, house number, unit and coordinates from the returned object.
 
 ## Provider boundary
 
@@ -125,7 +165,7 @@ npm run check
 npm pack --dry-run
 ```
 
-Tests run on Node 22.6+ (`--experimental-strip-types`). The library itself targets Node 20+. ESM only (Node 22.12+ can `require()` it).
+The v0.10.0 release passes **50/50 tests** and TypeScript strict compilation.
 
 ## Third-party data notice
 
@@ -163,12 +203,3 @@ Resolution is an **entity-resolution result, not authoritative verification**. I
 ### Why v0.9 does not infer every locality
 
 Nigerian locality names are not interchangeable with LGAs. A place such as Victoria Island can be useful address context without being sufficient evidence to assign a specific administrative unit. v0.9 therefore prefers `not-found`, `ambiguous`, or a ranked candidate set over an unjustified exact answer.
-
-## Known limitations (alpha)
-
-- Heuristic parser: handles common comma-separated and simple unpunctuated forms, not arbitrary free text. Expect misses on `Km 5, Ibadan-Ife Road`-style addresses, multi-landmark chains, and neighbourhood-vs-street ambiguity (a place such as `Computer Village` is returned as `street`).
-- `plot` is still mapped to `houseNumber`.
-- The Digital Postcode state-prefix check uses ISO 3166-2 codes and is **unconfirmed** against NIPOST's own prefix table. Format validation matches NIPOST's published pattern; existence needs the API.
-- State/LGA is inferred only from explicit names or exact locality matches (e.g. `Ibadan` does not resolve to a single LGA).
-- Accuracy on real-world addresses has not been measured on a large independent corpus.
-- `NipostClient` targets `GET /v1/lookup` per NIPOST's OpenAPI spec; response objects are passed through as returned.

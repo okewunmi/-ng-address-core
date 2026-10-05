@@ -1,28 +1,20 @@
 # Changelog
 
-## 0.1.0-alpha.1 (first public pre-release)
-Version reset from the internal 0.10.0 line to signal alpha status. Internal history is kept below.
+## 0.11.0 - 2026-10-04
 
-### Fixed
-- House numbers: `No.`, `No.12`, `House No. 12`, `Number 12` now parse.
-- A state name inside a street (`5 Kano Road, Ibadan`) no longer overrides the real state.
-- `validateAddress` accepted no parser-produced Digital Postcode; now uses `isDigitalPostcode`.
-- Single source of truth for state codes (catalog / ISO 3166-2); the conflicting second table was removed.
-- `compareAddresses`: requires overlapping house number/street/postcode, compares `unit`, flags one-sided house/unit and differing street types.
-- `addressFingerprint`/`addressId` now include `unit` and `poBox`.
-- Casing keeps acronyms and Roman numerals (`UI`, `GRA`, `Wuse II`); street types are Title Case.
-- Street no longer duplicated into `district`; labelled `Area 11` keeps its label; P.O. Box has its own field.
-- `normalizeState` returns canonical names or `undefined`.
-- NIPOST adapter: object-shaped `administrative_address`/`recent_house_address`, GeoJSON coordinates, base-URL paths, optional key via `allowAnonymous`, opt-in retries with `Retry-After`.
-- `redactAddress` also removes Digital Postcode, landmarks, P.O. Box and premises; `serializeAddress` is key-order independent.
 ### Added
-- `premises` and `poBox` fields; unversioned catalog names (`getState`, `listLgas`, `lookupLga`, `STATES`, `LGAS`); `RedactOptions.coarse`.
-### Changed
-- Gold corpus test now asserts exact street/house number/premises (previously 0 of 37 streets were correct while the test passed). 66 tests.
-- Parsing ~4x faster (precompiled patterns, memoized normalization).
-- `typescript` is a pinned devDependency; `prepublishOnly` runs the full check.
-### Deprecated
-- `*V8` catalog names; `parseAddresses({ concurrency })` (no effect).
+- locality resolver with capital/LGA entity kinds
+- locality aliases and diacritic-insensitive matching
+- explicit `unique` / `ambiguous` / `not-found` locality results
+- adversarial field-level parser benchmark tests
+
+### Improved
+- unpunctuated city detection in common Nigerian addresses
+- canonical locality casing for uppercase and accented input
+- parser reuse of the locality resolution layer
+
+### Safety
+- locality resolution remains non-authoritative and does not imply building existence or provider verification
 
 
 ## 0.10.0

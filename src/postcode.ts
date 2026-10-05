@@ -1,4 +1,3 @@
-import { STATES_V8 } from "./catalog.js";
 /** Nigerian legacy postal postcode: six digits. */
 export function isLegacyPostcode(value: string): boolean {
   return /^\d{6}$/.test(value.trim());
@@ -13,13 +12,12 @@ export function isLegacyPostcode(value: string): boolean {
  */
 const DIGITAL_POSTCODE_PATTERN = /^([A-Z]{2})[-\s]?(\d{2})[-\s]?([A-Z0-9]{3})[-\s]?([A-Z]{2})[-\s]?(\d{2})$/i;
 
-/**
- * Two-letter state/FCT prefixes, derived from the bundled catalog (ISO 3166-2:NG codes).
- * NOTE: these have NOT been confirmed against NIPOST's own prefix table. Only `EK` (Ekiti)
- * appears in NIPOST examples. Treat `isKnownDigitalPostcodeState` as a heuristic and rely on the
- * NIPOST API for authority.
- */
-export const DIGITAL_STATE_CODES: ReadonlySet<string> = new Set(STATES_V8.map(state => state.code));
+/** Published state/FCT prefixes used only for optional semantic checks. */
+export const DIGITAL_STATE_CODES = new Set([
+  "AB","AD","AK","AN","BA","BY","BE","BR","CR","DE","EB","ED",
+  "EK","EN","FC","GM","IM","JI","KD","KN","KT","KE","KG","KW",
+  "LA","NA","NI","OG","ON","OS","OY","PL","RI","SK","TA","YB","ZA"
+]);
 
 export function parseDigitalPostcode(value: string): { state: string; lga: string; district: string; area: string; building: string } | undefined {
   const match = value.trim().toUpperCase().match(DIGITAL_POSTCODE_PATTERN);
@@ -48,11 +46,10 @@ export function normalizeDigitalPostcode(value: string): string {
 }
 
 export function extractPostcodes(raw: string): { legacy?: string; digital?: string } {
-  const candidates = raw.match(/\b[A-Za-z]{2}(?:[-\s]?\d{2})[-\s]?[A-Za-z0-9]{3}[-\s]?[A-Za-z]{2}[-\s]?\d{2}\b/g) ?? [];
-  const digital = candidates.find(c => isDigitalPostcode(c));
+  const digital = raw.match(/\b[A-Za-z]{2}(?:[-\s]?\d{2})[-\s]?[A-Za-z0-9]{3}[-\s]?[A-Za-z]{2}[-\s]?\d{2}\b/);
   const legacy = raw.match(/\b\d{6}\b/);
   return {
     ...(legacy ? { legacy: legacy[0] } : {}),
-    ...(digital ? { digital: normalizeDigitalPostcode(digital) } : {})
+    ...(digital ? { digital: normalizeDigitalPostcode(digital[0]) } : {})
   };
 }

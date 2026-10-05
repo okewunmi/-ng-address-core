@@ -10,8 +10,6 @@ export interface Coordinates { latitude: number; longitude: number; }
 export interface NgAddress {
   country: "NG"; state?: AdministrativeUnit; lga?: AdministrativeUnit; locality?: string;
   district?: string; area?: string; street?: string; houseNumber?: string; unit?: string;
-  /** Named premises such as "INEC State Headquarters" or "Teaching Hospital" (not a street). */ premises?: string;
-  /** P.O. Box number text, e.g. "P.O. Box 125". */ poBox?: string;
   landmark?: Landmark; landmarks?: Landmark[]; postcode?: string; digitalPostcode?: string;
   coordinates?: Coordinates; raw: string; normalized: string; confidence: number; type: AddressType; warnings: string[];
 }
